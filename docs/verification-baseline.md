@@ -169,6 +169,12 @@ images or modify issues. These are repository settings; their workflow files
 were not changed. No analytics code, dependency versions, test expectations, or
 lint rules changed during this trigger investigation.
 
+An ordinary `git push origin master` of commit
+`29ca8d3c0e3e99ba35c13714c8a6727ad1f51c4d` automatically started
+[CI run 34886827906](https://github.com/smcallah/monkelytics/actions/runs/34886827906).
+GitHub reports its event as `push`, confirming that fork activation restored the
+automatic trigger without a manual dispatch or workflow-code change.
+
 ## Self-hosting
 
 Compose now builds the current checkout's Dockerfile instead of pulling an
