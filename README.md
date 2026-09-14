@@ -27,7 +27,8 @@ A detailed getting started guide can be found at [umami.is/docs](https://umami.i
 
 ### Requirements
 
-- A server with Node.js version 18.18+.
+- Node.js 22.13 or newer in the 22.x line (used by CI and Docker).
+- pnpm 11.21.0, as pinned in `package.json`.
 - A PostgreSQL database version v12.14+.
 
 ### Get the source code and install packages
@@ -80,18 +81,12 @@ By default, this will launch the application on `http://localhost:3000`. You wil
 
 ## 🐳 Installing with Docker
 
-Umami provides Docker images as well as a Docker compose file for easy deployment.
-
-Docker image:
-
-```bash
-docker pull docker.umami.is/umami-software/umami:latest
-```
-
-Docker compose (Runs Umami with a PostgreSQL database):
+This fork's Compose configuration builds the application from the current checkout
+and runs it with PostgreSQL. Replace the example secrets in `docker-compose.yml`
+before deploying. The existing database volume is retained when the application is rebuilt.
 
 ```bash
-docker compose up -d
+docker compose up --build -d
 ```
 
 ---
@@ -106,14 +101,18 @@ pnpm install
 pnpm build
 ```
 
-To update the Docker image, simply pull the new images and rebuild:
+To update this fork's Docker application after updating the checkout, rebuild it:
 
 ```bash
-docker compose pull
-docker compose up --force-recreate -d
+docker compose up --build -d
 ```
 
 ---
+
+## Verification
+
+See [the verification baseline](docs/verification-baseline.md) for the supported
+toolchain, commands, measured results, and existing failures.
 
 ## 🛟 Support
 

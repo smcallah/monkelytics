@@ -3,6 +3,12 @@ docker-compose.yml
 Dockerfile
 .DS_Store
 node_modules
+.next
+.pnpm-store
+generated
+src/generated
+geo
+*.log
 .idea
 .env
 .env.*

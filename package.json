@@ -10,6 +10,7 @@
     "url": "https://github.com/umami-software/umami.git"
   },
   "type": "module",
+  "packageManager": "pnpm@11.21.0",
   "scripts": {
     "dev": "dotenv next dev --turbo",
     "build": "npm-run-all check-env build-db check-db build-tracker build-recorder build-geo build-app",
@@ -44,6 +45,8 @@
     "postbuild": "node scripts/postbuild.js",
     "pretest": "pnpm build-db-client",
     "test": "vitest run",
+    "pretypecheck": "pnpm build-db-client",
+    "typecheck": "next typegen && tsc --noEmit",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
