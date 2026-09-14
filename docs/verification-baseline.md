@@ -69,7 +69,7 @@ network-enabled frozen install succeeded without changing the lockfile.
 | Frozen dependency installation | Passed; lockfile unchanged. |
 | Unit/component tests | Passed before and after configuration changes: 95 files, 739 tests. |
 | TypeScript | Passed. Initial direct `tsc --noEmit` and the final `pnpm typecheck` reported no errors. |
-| Lint | Existing failure: 1 error, 13 warnings, 11 informational diagnostics, before and after changes. |
+| Lint | Stage 1 initially retained 1 existing error, 13 warnings, and 11 informational diagnostics. The verification follow-up fixed the error; lint now exits successfully with the same warnings and informational diagnostics. |
 | Application build | Passed with the existing build-only database option, including tracker, recorder, GeoLite database, and production Next.js output. |
 | Compose configuration | Passed on the Docker host. |
 | Docker image | Passed on Linux ARM64 after enforcing LF shell-script endings. Dockerfile unchanged. |
@@ -103,11 +103,11 @@ container and network, which Compose left behind. No existing deployment was
 removed. Project-label checks confirmed no test containers, volumes, or networks
 remained.
 
-The lint error is `lint/correctness/useHookAtTopLevel` in
+The original lint error was `lint/correctness/useHookAtTopLevel` in
 `src/app/not-found.tsx`: the anonymous default-exported function calls
-`useMessages`. It was present before these changes and remains unfixed because
-stage 1 is limited to verification and deployment configuration. Other lint
-diagnostics include unused imports/variables, style issues, a Biome configuration
+`useMessages`. The verification follow-up names that component `NotFound`, which
+lets Biome recognize it as a React component without changing its rendered output.
+Other lint diagnostics include unused imports/variables, style issues, a Biome configuration
 schema-version mismatch, and a deprecated configuration field. No autofix or
 rule suppression was applied.
 
@@ -128,10 +128,32 @@ is removed. Tests, typecheck, lint, and build run as separate matrix jobs, with
 fail-fast disabled so every result remains visible. A separate job validates
 Compose and builds the image without publishing it.
 
-The known lint error will fail its CI job. There is no `continue-on-error`,
-ignored command status, or lint suppression. GitHub-hosted execution has not
-been observed during this local verification; the workflow must run after the
-changes are pushed.
+The original lint error has been fixed. There is no `continue-on-error`,
+ignored command status, or lint suppression. The verification follow-up confirmed
+that GitHub Actions is enabled and the CI workflow is active.
+
+### Verification follow-up: 2026-09-14
+
+Commit `fe10f705a66d32d5c24660fcc9ac5c870d6cf620` names the `NotFound` component.
+Local verification on Node 22.23.2 and pnpm 11.21.0 passed:
+
+- `pnpm lint --max-diagnostics=100`: exit 0, with 13 existing warnings and 11 informational diagnostics.
+- `pnpm test`: all 95 files and 739 tests passed.
+- `pnpm typecheck`: exit 0, no TypeScript errors.
+- `pnpm build`: exit 0 using the existing dummy database URL and `SKIP_DB_CHECK=1`.
+
+[GitHub Actions run 34884650620](https://github.com/smcallah/monkelytics/actions/runs/34884650620)
+passed all five jobs on that commit: tests, typecheck, lint, application build,
+and Docker build/Compose configuration. Each Node job installed dependencies
+with `pnpm install --frozen-lockfile`. The Docker job validated Compose and built
+the application from source on the GitHub-hosted Linux runner.
+
+No runs were listed when the follow-up began, despite Actions being enabled and
+the workflow being active. This successful run was started with
+`gh workflow run ci.yml --repo smcallah/monkelytics --ref master`. It verifies
+manual dispatch and the jobs themselves; it does not establish why the earlier
+pushes did not produce runs. The workflow still declares push and pull-request
+triggers. No repository permission changes or test/lint suppressions were needed.
 
 ## Self-hosting
 
