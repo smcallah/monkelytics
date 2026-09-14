@@ -39,6 +39,7 @@ pm2.yml
 .agents
 tmpclaude*
 CLAUDE.md
+AGENTS.md
 nul
 
 # debug
