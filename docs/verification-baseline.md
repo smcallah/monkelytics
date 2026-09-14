@@ -153,7 +153,9 @@ the workflow being active. This successful run was started with
 `gh workflow run ci.yml --repo smcallah/monkelytics --ref master`. It verifies
 manual dispatch and the jobs themselves; it does not establish why the earlier
 pushes did not produce runs. The workflow still declares push and pull-request
-triggers. No repository permission changes or test/lint suppressions were needed.
+triggers. The follow-up also explicitly enabled `ci.yml` with `gh workflow enable`
+and confirmed its state is `active`. No repository permission changes or
+test/lint suppressions were needed. Automatic push triggering remains unverified.
 
 ## Self-hosting
 
