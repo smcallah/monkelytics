@@ -148,14 +148,26 @@ and Docker build/Compose configuration. Each Node job installed dependencies
 with `pnpm install --frozen-lockfile`. The Docker job validated Compose and built
 the application from source on the GitHub-hosted Linux runner.
 
-No runs were listed when the follow-up began, despite Actions being enabled and
-the workflow being active. This successful run was started with
-`gh workflow run ci.yml --repo smcallah/monkelytics --ref master`. It verifies
-manual dispatch and the jobs themselves; it does not establish why the earlier
-pushes did not produce runs. The workflow still declares push and pull-request
-triggers. The follow-up also explicitly enabled `ci.yml` with `gh workflow enable`
-and confirmed its state is `active`. No repository permission changes or
-test/lint suppressions were needed. Automatic push triggering remains unverified.
+The initial successful run was started with
+`gh workflow run ci.yml --repo smcallah/monkelytics --ref master`. Normal pushes
+were still blocked by GitHub's fork-wide Actions activation gate. The repository
+permissions API reported `enabled: true`, and the workflow API reported `active`,
+but the Actions page still displayed "Workflows aren't being run on this forked
+repository." Enabling the individual workflow through `gh workflow enable` did
+not clear that gate. A fresh branch push reproduced the missing-run behavior.
+
+The gate was cleared on the repository's Actions page using "I understand my
+workflows, go ahead and enable them"; GitHub then confirmed "Actions Enabled."
+This is the fork activation step described in the
+[GitHub event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflows-in-forked-repositories).
+Git and the GitHub CLI both authenticated as the repository owner using the same
+OAuth credential; the cause was not an Actions `GITHUB_TOKEN` push.
+
+Only `ci.yml` is active. The inherited `cd.yml`, `cd-cloud.yml`, and
+`stale-issues.yml` workflows were kept disabled so activation does not publish
+images or modify issues. These are repository settings; their workflow files
+were not changed. No analytics code, dependency versions, test expectations, or
+lint rules changed during this trigger investigation.
 
 ## Self-hosting
 
