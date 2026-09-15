@@ -31,9 +31,9 @@ Assistant. Use the application's configured base path when applicable.
 ```yaml
 sensor:
   - platform: rest
-    name: Umami Health
-    unique_id: umami_health
-    resource: "http://analytics-host:3000/health"
+    name: Monkelytics Health
+    unique_id: monkelytics_health
+    resource: "http://gibbon.local:3300/health"
     method: GET
     scan_interval: 60
     timeout: 10
@@ -44,25 +44,72 @@ sensor:
 
 The sensor displays `ok` when the endpoint responds. A timeout makes the sensor
 unavailable; it does not change the application's JSON to an error status.
+On initial setup, Home Assistant waits for a successful connection before
+creating the entity. Connection failures can therefore leave no sensor visible.
 The availability template also rejects responses without a JSON `status` field.
 For multiple installations, use a different `unique_id` for each sensor.
 Check the Home Assistant configuration and restart Home Assistant to load it.
 This example uses the built-in
 [RESTful Sensor integration](https://www.home-assistant.io/integrations/sensor.rest/).
 
+The example URL matches the test deployment on port 3300. A default Compose
+installation uses port 3000; use the port published by your deployment. If you
+already created the earlier `umami_health` entity, retain that `unique_id` and
+rename the existing entity to Monkelytics Health in Home Assistant to avoid
+creating a second sensor.
+
+### IPv4 and IPv6 hostnames
+
+A hostname can resolve to IPv4 or IPv6. Both paths must reach the published
+port. On the tested Docker 20.10.5 host, an IPv4-only bridge published only an
+IPv4 listener, even when an explicit IPv6 port binding was requested. The
+`docker-compose.ipv6.yml` overlay enables IPv6 on the bridge and sets the
+application listener to `::`, which accepts both address families.
+
+Set `IPV6_SUBNET` in your deployment's `.env` to an unused private IPv6 /64.
+This is an internal Docker network prefix, not the address of the server or a
+replacement for its hostname. Use a distinct prefix per deployment. An explicit
+prefix also supports older Docker engines without automatic IPv6 pool allocation.
+Generate a prefix once, add the printed line to `.env`, and retain it for that
+deployment:
+
+```sh
+python3 -c "import secrets; p='fd'+secrets.token_hex(5); print('IPV6_SUBNET='+':'.join(p[i:i+4] for i in range(0,12,4))+'::/64')"
+```
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.ipv6.yml up --build -d
+```
+
+Changing an existing network requires recreating that project's containers and
+network. Preserve the database volume: use `down` without `--volumes` before
+starting it with the overlay. For the separate port-3300 test installation:
+
+```sh
+docker rm -f health-test-app  # Only when replacing the existing test application.
+docker compose -p health-test down  # Retains the test database volume.
+docker compose -p health-test -f docker-compose.yml -f docker-compose.ipv6.yml up -d --wait db
+docker compose -p health-test -f docker-compose.yml -f docker-compose.ipv6.yml run --no-deps -d --name health-test-app -p 3300:3000 umami
+curl --noproxy '*' -4 --fail http://gibbon.local:3300/health
+curl --noproxy '*' -6 --fail http://gibbon.local:3300/health
+```
+
+Both requests must return `{"status":"ok"}`. Verify from another machine as
+well as the Docker host; hostname resolution and network reachability can differ.
+
 ## Verification
 
 Check the deployed response with:
 
 ```sh
-curl --fail-with-body --include http://analytics-host:3000/health
+curl --fail-with-body --include http://gibbon.local:3300/health
 ```
 
 The request-level regression checks use Playwright's HTTP client and need no
 browser or login. Against a running installation, run:
 
 ```sh
-PLAYWRIGHT_SKIP_WEB_SERVER=1 PLAYWRIGHT_BASE_URL=http://localhost:3000/ pnpm test:e2e tests/e2e/health.spec.ts
+PLAYWRIGHT_SKIP_WEB_SERVER=1 PLAYWRIGHT_BASE_URL=http://gibbon.local:3300/ pnpm test:e2e tests/e2e/health.spec.ts
 ```
 
 On PowerShell, set these variables with `$env:` before running the command.
@@ -83,5 +130,13 @@ contract also passed before and after stopping its disposable PostgreSQL
 container. The test deployment was removed afterward.
 
 The Home Assistant example was checked against its official documentation and
-parsed as YAML. It has not been installed in a live Home Assistant instance.
+parsed as YAML. On 2026-09-15, the user confirmed that the live Home Assistant
+sensor reports `ok`. The port-3300 deployment was then corrected for IPv6 and
+verified from a separate Windows host using both `curl -4` and `curl -6` with
+`gibbon.local`. Both returned HTTP 200 and `{"status":"ok"}`. Its PostgreSQL
+volume was retained and startup reported no pending migrations.
 The rest of the Playwright suite was not run for this change.
+
+The first test container's logs showed about 13 seconds from container start to
+application ready, including initial migrations. Image build time is separate;
+the first build downloads dependencies and compiles the application.
