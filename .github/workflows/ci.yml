@@ -30,6 +30,13 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm ${{ matrix.check }}
+      - name: Verify health over HTTP
+        if: matrix.check == 'build'
+        run: pnpm test:e2e tests/e2e/health.spec.ts
+        env:
+          PLAYWRIGHT_WEB_SERVER_COMMAND: node .next/standalone/server.js
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000/
+          HOSTNAME: 127.0.0.1
 
   docker:
     name: Docker build and Compose configuration
