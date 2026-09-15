@@ -30,6 +30,12 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm ${{ matrix.check }}
+      - name: Verify identity boundaries in multiple server timezones
+        if: matrix.check == 'test'
+        run: |
+          for timezone in UTC America/New_York Asia/Kathmandu; do
+            TZ="$timezone" pnpm exec vitest run src/app/api/send/route.test.ts src/lib/crypto.test.ts src/lib/session.test.ts
+          done
       - name: Verify health over HTTP
         if: matrix.check == 'build'
         run: pnpm test:e2e tests/e2e/health.spec.ts
