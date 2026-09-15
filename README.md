@@ -114,6 +114,9 @@ docker compose up --build -d
 See [the verification baseline](docs/verification-baseline.md) for the supported
 toolchain, commands, measured results, and existing failures.
 
+See [health monitoring](docs/health.md) for the public `/health` liveness endpoint
+and a Home Assistant REST sensor example.
+
 ## 🛟 Support
 
 <p align="center">
