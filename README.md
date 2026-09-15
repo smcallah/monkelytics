@@ -85,6 +85,10 @@ This fork's Compose configuration builds the application from the current checko
 and runs it with PostgreSQL. Replace the example secrets in `docker-compose.yml`
 before deploying. The existing database volume is retained when the application is rebuilt.
 
+The published port defaults to 3000. Set `UMAMI_PORT=3300` in `.env` to use port
+3300 instead. See [IPv4 and IPv6 hostname setup](docs/health.md#ipv4-and-ipv6-hostnames)
+to persist the IPv6 overlay and deployment settings.
+
 ```bash
 docker compose up --build -d
 ```

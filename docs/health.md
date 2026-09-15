@@ -77,25 +77,52 @@ deployment:
 python3 -c "import secrets; p='fd'+secrets.token_hex(5); print('IPV6_SUBNET='+':'.join(p[i:i+4] for i in range(0,12,4))+'::/64')"
 ```
 
-```sh
-docker compose -f docker-compose.yml -f docker-compose.ipv6.yml up --build -d
+Also add these settings to `.env` so every Compose command uses the same files
+and project. This example is for the existing `health-test` deployment on port
+3300. For another installation, retain its existing project name to keep using
+its database volume, and choose its published port. Without `UMAMI_PORT`, the
+default port remains 3000.
+
+```dotenv
+COMPOSE_FILE=docker-compose.yml:docker-compose.ipv6.yml
+COMPOSE_PATH_SEPARATOR=:
+COMPOSE_PROJECT_NAME=health-test
+UMAMI_PORT=3300
 ```
 
-Changing an existing network requires recreating that project's containers and
-network. Preserve the database volume: use `down` without `--volumes` before
-starting it with the overlay. For the separate port-3300 test installation:
+Keep the generated `IPV6_SUBNET` setting alongside these lines. Merge settings
+into the existing `.env`; do not replace other settings. Run commands from the
+deployment directory. Docker commands may require `sudo` on your host.
+
+For an existing installation that used the earlier one-off `health-test-app`
+container, remove that container and recreate the project's network once before
+starting the managed service. The following retains the database volume:
 
 ```sh
-docker rm -f health-test-app  # Only when replacing the existing test application.
-docker compose -p health-test down  # Retains the test database volume.
-docker compose -p health-test -f docker-compose.yml -f docker-compose.ipv6.yml up -d --wait db
-docker compose -p health-test -f docker-compose.yml -f docker-compose.ipv6.yml run --no-deps -d --name health-test-app -p 3300:3000 umami
+docker rm -f health-test-app
+docker compose down
+```
+
+When first changing an existing network to IPv6, run `docker compose down`
+without `--volumes`, then start the deployment. This preserves the database
+volume. Keep the same Compose project name throughout.
+
+Build and start both services with:
+
+```sh
+docker compose up --build -d --wait
 curl --noproxy '*' -4 --fail http://gibbon.local:3300/health
 curl --noproxy '*' -6 --fail http://gibbon.local:3300/health
 ```
 
 Both requests must return `{"status":"ok"}`. Verify from another machine as
 well as the Docker host; hostname resolution and network reachability can differ.
+
+To start an already built deployment, use `docker compose up --no-build -d --wait`.
+To stop and remove its containers and network, use `docker compose down` without
+`--volumes`. Both services are managed by Compose; no `compose run` command is
+needed. Do not override the saved files with `-f docker-compose.yml` alone,
+because that omits the IPv6 network configuration.
 
 ## Verification
 
@@ -140,3 +167,13 @@ The rest of the Playwright suite was not run for this change.
 The first test container's logs showed about 13 seconds from container start to
 application ready, including initial migrations. Image build time is separate;
 the first build downloads dependencies and compiles the application.
+
+The earlier one-off-container instructions failed when later commands omitted
+the IPv6 overlay: Compose tried to replace a network with the application still
+attached. On 2026-09-15, the test deployment was migrated to managed services with
+the project, port, and overlay saved in `.env`. Repeated `up` and complete
+`down`/`up --no-build -d --wait` cycles passed. PostgreSQL dump hashes matched
+before and after recreation using a fixed `pg_dump --restrict-key` to exclude
+random metadata differences. All four HTTP checks and separate IPv4/IPv6 hostname
+requests passed. CI now also tests startup and network recreation over both
+address families.
