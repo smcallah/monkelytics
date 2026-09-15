@@ -3,7 +3,7 @@ services:
   umami:
     build: .
     ports:
-      - "3000:3000"
+      - "${UMAMI_PORT:-3000}:3000"
     environment:
       DATABASE_URL: postgresql://umami:umami@db:5432/umami
       APP_SECRET: replace-me-with-a-random-string

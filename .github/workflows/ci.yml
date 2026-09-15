@@ -41,10 +41,37 @@ jobs:
   docker:
     name: Docker build and Compose configuration
     runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: monkelytics-ci
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config --quiet
       - run: docker compose -f docker-compose.yml -f docker-compose.ipv6.yml config --quiet
         env:
           IPV6_SUBNET: fd64:2a6f:91ce:1::/64
+          UMAMI_PORT: 3300
       - run: docker compose build
+      - name: Save deployment settings
+        run: |
+          cat > .env <<'EOF'
+          COMPOSE_FILE=docker-compose.yml:docker-compose.ipv6.yml
+          COMPOSE_PATH_SEPARATOR=:
+          COMPOSE_PROJECT_NAME=monkelytics-ci
+          UMAMI_PORT=3300
+          IPV6_SUBNET=fd64:2a6f:91ce:1::/64
+          EOF
+      - name: Verify Compose startup and network recreation
+        run: |
+          docker compose up --no-build -d --wait --wait-timeout 120
+          curl --noproxy '*' -4 --fail http://localhost:3300/health
+          curl --noproxy '*' -6 --fail http://localhost:3300/health
+          docker compose down
+          docker compose up --no-build -d --wait --wait-timeout 120
+          curl --noproxy '*' -4 --fail http://localhost:3300/health
+          curl --noproxy '*' -6 --fail http://localhost:3300/health
+      - name: Show deployment logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop CI deployment
+        if: always()
+        run: docker compose down
