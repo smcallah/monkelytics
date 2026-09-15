@@ -44,4 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config --quiet
+      - run: docker compose -f docker-compose.yml -f docker-compose.ipv6.yml config --quiet
+        env:
+          IPV6_SUBNET: fd64:2a6f:91ce:1::/64
       - run: docker compose build

@@ -1,0 +1,11 @@
+services:
+  umami:
+    environment:
+      HOSTNAME: "::"
+
+networks:
+  default:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: "${IPV6_SUBNET:?Set IPV6_SUBNET to an unused private IPv6 /64 for this deployment}"
