@@ -60,10 +60,23 @@ describe('md5', () => {
   });
 });
 
-describe('rotation boundaries (current server-local calendar)', () => {
-  test('daily salt stays stable throughout a local calendar day', () => {
-    expect(getSalt('day', new Date(2026, 8, 15, 0, 0, 0))).toBe(
-      getSalt('day', new Date(2026, 8, 15, 23, 59, 59, 999)),
+describe('rotation boundaries', () => {
+  test('daily salt uses the same UTC midnight in every server timezone without mutating the input', () => {
+    const date = new Date('2026-09-15T14:35:47.123Z');
+    expect(getSalt('day', date)).toBe(hash('Tue, 15 Sep 2026 00:00:00 GMT'));
+    expect(date.toISOString()).toBe('2026-09-15T14:35:47.123Z');
+  });
+
+  test('weekly and monthly salts retain their server-local calendar boundaries', () => {
+    const date = new Date(2026, 8, 16, 12);
+    expect(getSalt('week', date)).toBe(hash(new Date(2026, 8, 13).toUTCString()));
+    expect(getSalt('month', date)).toBe(hash(new Date(2026, 8, 1).toUTCString()));
+    expect(getSalt(undefined, date)).toBe(getSalt('month', date));
+  });
+
+  test('daily salt stays stable throughout a UTC calendar day', () => {
+    expect(getSalt('day', new Date(Date.UTC(2026, 8, 15, 0, 0, 0)))).toBe(
+      getSalt('day', new Date(Date.UTC(2026, 8, 15, 23, 59, 59, 999))),
     );
   });
 
@@ -72,22 +85,25 @@ describe('rotation boundaries (current server-local calendar)', () => {
     [2026, 8, 30],
     [2026, 11, 31],
     [2028, 1, 29],
-  ])('daily salt changes at local midnight after %i/%i/%i', (year, month, day) => {
-    expect(getSalt('day', new Date(year, month, day, 23, 59, 59, 999))).not.toBe(
-      getSalt('day', new Date(year, month, day + 1)),
+  ])('daily salt changes at UTC midnight after %i/%i/%i', (year, month, day) => {
+    expect(getSalt('day', new Date(Date.UTC(year, month, day, 23, 59, 59, 999)))).not.toBe(
+      getSalt('day', new Date(Date.UTC(year, month, day + 1))),
     );
   });
 
   test.each([
     [2026, 2, 8],
     [2026, 10, 1],
-  ])('daily salt spans the local DST transition day %i/%i/%i', (year, month, day) => {
-    const midnight = getSalt('day', new Date(year, month, day));
-    expect(getSalt('day', new Date(year, month, day, 1, 30))).toBe(midnight);
-    expect(getSalt('day', new Date(year, month, day, 3, 30))).toBe(midnight);
-    expect(getSalt('day', new Date(year, month, day, 23, 59))).toBe(midnight);
-    expect(getSalt('day', new Date(year, month, day + 1))).not.toBe(midnight);
-  });
+  ])(
+    'daily salt stays stable on a UTC day containing a US DST transition %i/%i/%i',
+    (year, month, day) => {
+      const midnight = getSalt('day', new Date(Date.UTC(year, month, day)));
+      expect(getSalt('day', new Date(Date.UTC(year, month, day, 1, 30)))).toBe(midnight);
+      expect(getSalt('day', new Date(Date.UTC(year, month, day, 3, 30)))).toBe(midnight);
+      expect(getSalt('day', new Date(Date.UTC(year, month, day, 23, 59)))).toBe(midnight);
+      expect(getSalt('day', new Date(Date.UTC(year, month, day + 1)))).not.toBe(midnight);
+    },
+  );
 
   test('monthly salt survives a day boundary but changes at the next month', () => {
     const first = getSalt('month', new Date(2026, 8, 15));
@@ -95,9 +111,9 @@ describe('rotation boundaries (current server-local calendar)', () => {
     expect(getSalt('month', new Date(2026, 9, 1))).not.toBe(first);
   });
 
-  test('unrecognized rotation settings currently fall back to monthly', () => {
+  test('unrecognized rotation settings are rejected', () => {
     const date = new Date(2026, 8, 15);
-    expect(getSalt('daily', date)).toBe(getSalt('month', date));
+    expect(() => getSalt('daily', date)).toThrow('SALT_ROTATION');
   });
 });
 

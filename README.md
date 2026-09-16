@@ -124,6 +124,9 @@ and a Home Assistant REST sensor example.
 See [the visitor identity review](docs/visitor-identity-review.md) for current
 rotation behavior, privacy limits, regression coverage, and the proposed daily-ID rollout.
 
+See [visitor rotation configuration](docs/daily-rotation.md) to opt into UTC daily
+rotation. Monthly rotation remains the default.
+
 ## 🛟 Support
 
 <p align="center">

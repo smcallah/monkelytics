@@ -892,12 +892,12 @@ describe('visitor identity across requests (current behavior)', () => {
   });
 
   test.each(['event', 'identify', 'performance'])(
-    "%s replaces yesterday's cached session before writing at local midnight",
+    "%s replaces yesterday's cached session before writing at UTC midnight",
     async type => {
       const payload = type === 'identify' ? { data: { plan: 'free' } } : {};
-      const first = await collect(new Date(2026, 8, 15, 23, 59, 59), undefined, payload, type);
+      const first = await collect(new Date('2026-09-15T23:59:59Z'), undefined, payload, type);
       vi.clearAllMocks();
-      const midnight = new Date(2026, 8, 16);
+      const midnight = new Date('2026-09-16T00:00:00Z');
       const second = await collect(midnight, first.cache, payload, type);
       const write = type === 'identify' ? saveSessionDataMock : saveEventMock;
 
@@ -927,6 +927,14 @@ describe('visitor identity across requests (current behavior)', () => {
     const nextDay = await collect(new Date(2026, 8, 16, 12));
     expect(reload.sessionId).toBe(first.sessionId);
     expect(nextDay.sessionId).not.toBe(first.sessionId);
+  });
+
+  test('daily IDs stay stable across New York midnight within one UTC day', async () => {
+    const first = await collect(new Date('2026-09-15T23:59:59-04:00'));
+    const second = await collect(new Date('2026-09-16T00:00:00-04:00'), first.cache);
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(second.visitId).toBe(first.visitId);
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
   });
 
   test('the unchanged default keeps the visitor ID across days within a month', async () => {
@@ -986,8 +994,13 @@ describe('visitor identity across requests (current behavior)', () => {
 
   test('explicit identify values remain linkable across daily rotation', async () => {
     const payload = { id: 'customer-42' };
-    const first = await collect(new Date(2026, 8, 15, 23, 59, 59), undefined, payload, 'identify');
-    const second = await collect(new Date(2026, 8, 16), first.cache, payload, 'identify');
+    const first = await collect(new Date('2026-09-15T23:59:59Z'), undefined, payload, 'identify');
+    const second = await collect(
+      new Date('2026-09-16T00:00:00Z'),
+      first.cache,
+      payload,
+      'identify',
+    );
     expect(second.sessionId).not.toBe(first.sessionId);
     expect(saveSessionLinkMock).toHaveBeenNthCalledWith(
       1,

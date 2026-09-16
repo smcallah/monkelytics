@@ -34,7 +34,7 @@ jobs:
         if: matrix.check == 'test'
         run: |
           for timezone in UTC America/New_York Asia/Kathmandu; do
-            TZ="$timezone" pnpm exec vitest run src/app/api/send/route.test.ts src/lib/crypto.test.ts src/lib/session.test.ts
+            TZ="$timezone" pnpm exec vitest run src/app/api/send/route.test.ts src/lib/crypto.test.ts src/lib/session.test.ts src/lib/salt-rotation.test.ts
           done
       - name: Verify health over HTTP
         if: matrix.check == 'build'
@@ -47,6 +47,7 @@ jobs:
   docker:
     name: Docker build and Compose configuration
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       COMPOSE_PROJECT_NAME: monkelytics-ci
     steps:
@@ -75,6 +76,35 @@ jobs:
           docker compose up --no-build -d --wait --wait-timeout 120
           curl --noproxy '*' -4 --fail http://localhost:3300/health
           curl --noproxy '*' -6 --fail http://localhost:3300/health
+      - name: Reject invalid rotation settings at container startup
+        run: |
+          for rotation in daily ''; do
+            status=0
+            timeout 30s docker compose run --rm --no-deps -e "SALT_ROTATION=$rotation" -e SKIP_DB_CHECK=1 umami > invalid-rotation.log 2>&1 || status=$?
+            if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+              cat invalid-rotation.log
+              echo 'Invalid SALT_ROTATION must exit unsuccessfully without timing out'
+              exit 1
+            fi
+            cat invalid-rotation.log
+            grep -F 'SALT_ROTATION must be one of: day, week, month.' invalid-rotation.log
+          done
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Verify browser and PostgreSQL across UTC midnight
+        env:
+          COMPOSE_FILE: docker-compose.yml:docker-compose.ipv6.yml:tests/integration/compose.yml
+          COMPOSE_PATH_SEPARATOR: ":"
+        run: |
+          docker compose up --no-build -d --wait --wait-timeout 120
+          pnpm exec playwright test --config tests/integration/playwright.config.ts
       - name: Show deployment logs on failure
         if: failure()
         run: docker compose logs --no-color
