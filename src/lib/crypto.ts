@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
-import { startOfDay, startOfMonth, startOfWeek } from 'date-fns';
+import { startOfMonth, startOfWeek } from 'date-fns';
 import { v4, v5, v7 } from 'uuid';
+import { parseSaltRotation } from './salt-rotation';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
@@ -69,10 +70,13 @@ export function createAuthKey() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-export function getSalt(saltRotation: string, createdAt: Date): string {
-  return hash(
-    (saltRotation === 'day' ? startOfDay : saltRotation === 'week' ? startOfWeek : startOfMonth)(
-      createdAt,
-    ).toUTCString(),
-  );
+export function getSalt(saltRotation: string | undefined, createdAt: Date): string {
+  const rotation = parseSaltRotation(saltRotation);
+  if (rotation === 'day') {
+    const midnight = new Date(createdAt);
+    midnight.setUTCHours(0, 0, 0, 0);
+    return hash(midnight.toUTCString());
+  }
+
+  return hash((rotation === 'week' ? startOfWeek : startOfMonth)(createdAt).toUTCString());
 }

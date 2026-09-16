@@ -1,0 +1,9 @@
+# Test-only overlay. Paths resolve against the repository's base Compose file.
+services:
+  umami:
+    environment:
+      SALT_ROTATION: day
+      TZ: America/New_York
+      NODE_OPTIONS: --require /identity-test/server-clock.cjs
+    volumes:
+      - ./tests/integration/server-clock.cjs:/identity-test/server-clock.cjs:ro

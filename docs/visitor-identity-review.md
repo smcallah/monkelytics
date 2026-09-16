@@ -2,8 +2,9 @@
 
 Reviewed on 2026-09-15 against the PostgreSQL collection path. The initial review
 added tests and documentation only. The cache-scope correction below is the first
-implementation follow-up. Monthly rotation remains the default; deployment
-settings, database schema, and stored data are unchanged.
+implementation follow-up. [UTC daily rotation](daily-rotation.md) is the next
+follow-up and adds validated Compose configuration. Monthly rotation remains the
+default; database schema and existing stored data are unchanged.
 
 ## What already exists
 
@@ -25,12 +26,13 @@ value derived from the session ID and an hour salt. The
 [`session statistics query`](../src/queries/sql/sessions/getWebsiteSessionStats.ts)
 counts distinct session IDs as visitors and distinct visit IDs as visits.
 
-`SALT_ROTATION` supports `day` and `week`; all other values use a month. Missing
-configuration defaults to `month`. These periods start in the server's local
-timezone. Converting the start date to a UTC string does not make the boundary
-UTC. The browser timezone and dashboard timezone do not select the boundary.
-The Compose files currently do not pass `SALT_ROTATION` into the application;
-putting that variable in `.env` alone would not enable daily rotation there.
+At review time, `SALT_ROTATION` supported `day` and `week`, with all other values
+falling back to a month. All periods used the server's local timezone and Compose
+did not pass the setting into the app. The [UTC daily follow-up](daily-rotation.md)
+changes daily mode to midnight UTC, rejects invalid settings, and exposes the
+setting in Compose. Missing configuration still defaults to `month`, and weekly
+and monthly boundaries remain server-local. Browser/dashboard timezones do not
+select the identity boundary.
 
 On a changed session ID, a website request creates the PostgreSQL session before
 writing its event or session data, replaces the visit ID, and resets the cache
@@ -42,14 +44,14 @@ time, but collection does not give it an expiry time.
 
 | Finding | Evidence | Consequence / next action |
 | --- | --- | --- |
-| Daily rotation works at server-local midnight, including a live cached session. | Route and crypto tests pass in UTC, America/New_York, and Asia/Kathmandu. | Use an explicit UTC day boundary for a future daily mode so hosts agree. Keep weekly/monthly compatibility deliberate. |
+| Daily rotation originally used server-local midnight. | The UTC daily follow-up tests an explicit UTC boundary across server timezones. | Corrected for daily mode; weekly/monthly compatibility is retained. |
 | A supplied event timestamp chooses the identity period. | Route test reproduces an old day's ID when the request arrives two days later. | Define browser receive-time behavior separately from historical imports before claiming old IDs cannot be reused. |
 | Explicit identity links survive daily rotation. | Two `identify` requests across midnight write the same `distinctId` against different session IDs. `session_link` queries can retrieve both. | Daily pseudonymous IDs alone do not make explicit identification anonymous. Decide the policy for anonymous mode without silently breaking existing identify users. |
 | The calendar salt is deterministic and retained application secrets allow old IDs to be recomputed for known inputs. | `getSalt`, `secret`, and `uuid` source inspection. | Describe this as periodic pseudonymous identification, not guaranteed permanent unlinkability or daily secret destruction. |
 | The initial review found that cached website IDs were not compared with the requested website before skipping lookup. | Seven follow-up route regressions failed before the fix and pass with the website match check. | Corrected; see the cache-scope follow-up below. |
 | Cache tokens have no automatic expiry. | The returned token has no `exp` claim. The follow-up adds website matching to the signature and type checks. | Define token age and website revalidation separately; ID recomputation already handles normal day rollover. |
 | The 30-minute visit refresh can retain its visit ID within the same clock hour. | A real-token test at 09:00 and 09:30:01 returns the same visit ID with a refreshed issue time. | This is an existing visit-semantics limitation, separate from daily visitor rotation. |
-| Invalid rotation values silently use monthly rotation. | `daily` and `month` produce the same salt in a characterization test. | Validate configuration when adding the daily default. |
+| Invalid rotation values originally silently used monthly rotation. | The follow-up replaces this characterization with rejection tests and a startup check. | Corrected; only `day`, `week`, and `month` are accepted. |
 
 IP or user-agent changes can split one visitor within a day. Different visitors
 sharing the same IP and user-agent can share an ID. Native IPv6 address changes
@@ -99,9 +101,9 @@ of a website for a valid matching token. Those remain separate decisions.
 
 1. Completed: bind accepted cache tokens to the requested website, with tests
    proving a token from site A cannot skip validation of site B.
-2. Implement and test an explicit UTC day boundary for daily mode. Preserve
-   existing weekly/monthly behavior unless separately changed. Validate the
-   rotation setting and expose it through Compose.
+2. Implemented in the [UTC daily follow-up](daily-rotation.md): explicit UTC daily
+   boundaries, preserved weekly/monthly behavior, configuration validation, and
+   Compose support. Daily mode remains opt-in.
 3. Decide how anonymous mode handles explicit identities and supplied event
    timestamps. Document the resulting privacy limits and import compatibility.
 4. Enable the daily default only with those boundaries defined. Test open tabs

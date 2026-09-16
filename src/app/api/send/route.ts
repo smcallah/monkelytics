@@ -151,8 +151,7 @@ export async function POST(request: Request) {
     const createdAt = timestamp ? new Date(timestamp * 1000) : new Date();
     const now = Math.floor(Date.now() / 1000);
 
-    const saltRotation = process.env.SALT_ROTATION || 'month';
-    const sessionSalt = getSalt(saltRotation, createdAt);
+    const sessionSalt = getSalt(process.env.SALT_ROTATION, createdAt);
     const visitSalt = hash(startOfHour(createdAt).toUTCString());
 
     const sessionId = uuid(sourceId, ip, userAgent, sessionSalt);
