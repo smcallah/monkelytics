@@ -7,11 +7,19 @@ import { getSalt, hash, secret, uuid } from '@/lib/crypto';
 import { getClientInfo, hasBlockedIp } from '@/lib/detect';
 import { createToken, parseToken } from '@/lib/jwt';
 import { fetchWebsite } from '@/lib/load';
+import { getQueryStringPolicy } from '@/lib/query-string';
 import { parseRequest } from '@/lib/request';
 import { badRequest, forbidden, json, serverError } from '@/lib/response';
 import { anyObjectParam, urlOrPathParam } from '@/lib/schema';
 import { safeDecodeURI, safeDecodeURIComponent } from '@/lib/url';
-import { createSession, saveEvent, saveSessionData, saveSessionLink, updateSession } from '@/queries/sql';
+import {
+  createSession,
+  saveEvent,
+  saveSessionData,
+  saveSessionLink,
+  updateSession,
+} from '@/queries/sql';
+import { filterQueryString } from '@/tracker/query-string';
 
 interface Cache {
   websiteId: string;
@@ -80,6 +88,7 @@ export async function POST(request: Request) {
     }
 
     const { type, payload } = body;
+    const queryStringPolicy = getQueryStringPolicy();
 
     const {
       website: websiteId,
@@ -194,7 +203,7 @@ export async function POST(request: Request) {
 
     if (type === COLLECTION_TYPE.event) {
       const base = hostname ? `https://${hostname}` : 'https://localhost';
-      const currentUrl = new URL(url, base);
+      const currentUrl = filterQueryString(new URL(url, base), queryStringPolicy);
 
       let urlPath =
         currentUrl.pathname === '/undefined' ? '' : currentUrl.pathname + currentUrl.hash;
@@ -237,7 +246,11 @@ export async function POST(request: Request) {
           }
         }
         // Resolve path-only referrers against the event's domain, not the localhost fallback
-        const referrerUrl = new URL(referrer, eventDomain ? `https://${eventDomain}` : base);
+        const referrerUrl = filterQueryString(
+          new URL(referrer, eventDomain ? `https://${eventDomain}` : base),
+          queryStringPolicy,
+          true,
+        );
 
         referrerPath = referrerUrl.pathname;
         referrerQuery = referrerUrl.search.substring(1);

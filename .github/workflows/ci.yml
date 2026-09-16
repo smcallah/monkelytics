@@ -89,6 +89,19 @@ jobs:
             cat invalid-rotation.log
             grep -F 'SALT_ROTATION must be one of: day, week, month.' invalid-rotation.log
           done
+      - name: Reject invalid query privacy settings at container startup
+        run: |
+          for setting in QUERY_STRING_POLICY=invalid QUERY_STRING_POLICY= QUERY_STRING_ALLOWLIST=gclid; do
+            status=0
+            timeout 30s docker compose run --rm --no-deps -e "$setting" -e SKIP_DB_CHECK=1 umami > invalid-query-policy.log 2>&1 || status=$?
+            if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+              cat invalid-query-policy.log
+              echo 'Invalid query privacy configuration must exit unsuccessfully without timing out'
+              exit 1
+            fi
+            cat invalid-query-policy.log
+            grep -F 'QUERY_STRING_' invalid-query-policy.log
+          done
       - uses: pnpm/action-setup@v4
         with:
           run_install: false
@@ -98,10 +111,15 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Verify browser and PostgreSQL across UTC midnight
+      - name: Verify default query behavior in browser and PostgreSQL
+        run: pnpm exec playwright test --config tests/integration/playwright.config.ts query-string.spec.ts
+        env:
+          QUERY_STRING_TEST_MODE: preserve
+      - name: Verify browser privacy and PostgreSQL across UTC midnight
         env:
           COMPOSE_FILE: docker-compose.yml:docker-compose.ipv6.yml:tests/integration/compose.yml
           COMPOSE_PATH_SEPARATOR: ":"
+          QUERY_STRING_TEST_MODE: allowlist
         run: |
           docker compose up --no-build -d --wait --wait-timeout 120
           pnpm exec playwright test --config tests/integration/playwright.config.ts

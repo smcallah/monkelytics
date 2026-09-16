@@ -3,6 +3,8 @@ services:
   umami:
     environment:
       SALT_ROTATION: day
+      QUERY_STRING_POLICY: allowlist
+      QUERY_STRING_ALLOWLIST: utm_source,utm_campaign
       TZ: America/New_York
       NODE_OPTIONS: --require /identity-test/server-clock.cjs
     volumes:
