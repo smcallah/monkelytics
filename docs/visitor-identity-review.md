@@ -1,8 +1,9 @@
 # Visitor identity review
 
-Reviewed on 2026-09-15 against the PostgreSQL collection path. This change adds
-tests and documentation only. Monthly rotation remains the default; application
-code, deployment settings, database schema, and stored data are unchanged.
+Reviewed on 2026-09-15 against the PostgreSQL collection path. The initial review
+added tests and documentation only. The cache-scope correction below is the first
+implementation follow-up. Monthly rotation remains the default; deployment
+settings, database schema, and stored data are unchanged.
 
 ## What already exists
 
@@ -45,8 +46,8 @@ time, but collection does not give it an expiry time.
 | A supplied event timestamp chooses the identity period. | Route test reproduces an old day's ID when the request arrives two days later. | Define browser receive-time behavior separately from historical imports before claiming old IDs cannot be reused. |
 | Explicit identity links survive daily rotation. | Two `identify` requests across midnight write the same `distinctId` against different session IDs. `session_link` queries can retrieve both. | Daily pseudonymous IDs alone do not make explicit identification anonymous. Decide the policy for anonymous mode without silently breaking existing identify users. |
 | The calendar salt is deterministic and retained application secrets allow old IDs to be recomputed for known inputs. | `getSalt`, `secret`, and `uuid` source inspection. | Describe this as periodic pseudonymous identification, not guaranteed permanent unlinkability or daily secret destruction. |
-| Cached website IDs are not compared with the requested website ID before skipping website lookup. | Source inspection of the cache acceptance and lookup branches in `POST`. | Add a focused cache-scope fix and rejection/fallback tests before relying on tokens for website isolation. This review does not claim an end-to-end exploit reproduction. |
-| Cache tokens have no automatic expiry. | The returned token has no `exp` claim; collection only checks its signature and type. | Define token age and website revalidation separately; ID recomputation already handles normal day rollover. |
+| The initial review found that cached website IDs were not compared with the requested website before skipping lookup. | Seven follow-up route regressions failed before the fix and pass with the website match check. | Corrected; see the cache-scope follow-up below. |
+| Cache tokens have no automatic expiry. | The returned token has no `exp` claim. The follow-up adds website matching to the signature and type checks. | Define token age and website revalidation separately; ID recomputation already handles normal day rollover. |
 | The 30-minute visit refresh can retain its visit ID within the same clock hour. | A real-token test at 09:00 and 09:30:01 returns the same visit ID with a refreshed issue time. | This is an existing visit-semantics limitation, separate from daily visitor rotation. |
 | Invalid rotation values silently use monthly rotation. | `daily` and `month` produce the same salt in a characterization test. | Validate configuration when adding the daily default. |
 
@@ -72,9 +73,31 @@ event data, explicit identities, URLs, upstream access logs, and serialized
 errors are separate input/logging paths. They were not comprehensively audited
 in this milestone. No live database contents or host logs were audited here.
 
+## Cache-scope correction
+
+The collection route now accepts a signed cache token only when its website ID
+matches the requested website. A mismatched or missing website ID causes the
+whole token to be ignored, including its session, visit, issue time, and identity
+link state. The request then follows ordinary website lookup and session
+creation. A nonexistent website receives the existing HTTP 400 response before
+client detection or any persistence call. A matching token keeps its existing
+behavior. The public collection API does not become an authenticated API.
+
+Seven new route-level regressions cover cross-site tokens for event, identify,
+and performance requests, nonexistent target websites for all three request
+types, and a token with no website ID. All seven failed against the old code;
+the expanded 92 focused tests pass with the fix. These tests use real signed
+tokens and mocked lookup/persistence, not a live PostgreSQL exploit test.
+
+After the correction, all 769 tests across 95 files pass. Typecheck passes;
+lint passes with the unchanged 13 warnings and 11 informational diagnostics.
+
+This correction does not add token expiry or revalidate the continued existence
+of a website for a valid matching token. Those remain separate decisions.
+
 ## Recommended next implementation
 
-1. Bind accepted cache tokens to the requested website, with regression tests
+1. Completed: bind accepted cache tokens to the requested website, with tests
    proving a token from site A cannot skip validation of site B.
 2. Implement and test an explicit UTC day boundary for daily mode. Preserve
    existing weekly/monthly behavior unless separately changed. Validate the
@@ -92,7 +115,7 @@ must not describe switching back to monthly rotation as restoring prior counts.
 No new infrastructure is needed for these steps. Query-string privacy and
 branding remain separate work.
 
-## Verification
+## Initial review verification
 
 The existing focused baseline was 62 passing tests across the collection route,
 crypto helpers, and session tests. This review adds 23 cases. The expanded 85
