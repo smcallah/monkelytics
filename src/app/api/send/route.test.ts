@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 // Set a deterministic secret before anything reads it so that real crypto/jwt
 // helpers used by the route and by the test produce matching tokens.
@@ -691,7 +691,7 @@ describe('30-minute visit expiry', () => {
       {
         type: CACHE_TOKEN_TYPE,
         websiteId: WEBSITE_ID,
-        sessionId: 'cached-session',
+        sessionId: makeComputedSessionId(WEBSITE_ID),
         visitId: 'cached-visit',
         iat: oldIat,
       },
@@ -751,6 +751,174 @@ describe('30-minute visit expiry', () => {
     );
 
     await expect(response.json()).resolves.toMatchObject({ visitId: 'cached-visit' });
+  });
+});
+
+describe('visitor identity across requests (current behavior)', () => {
+  beforeEach(() => {
+    vi.stubEnv('SALT_ROTATION', 'day');
+    vi.useFakeTimers({ toFake: ['Date'] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  async function collect(
+    at: Date,
+    cache?: string,
+    payload: Record<string, unknown> = {},
+    type = 'event',
+  ) {
+    vi.setSystemTime(at);
+    const response = await callPOST(
+      { type, payload: { website: WEBSITE_ID, url: '/', ...payload } },
+      { headers: cache ? { 'x-umami-cache': cache } : undefined },
+    );
+    expect(response.status).toBe(200);
+    return response.json() as Promise<{ cache: string; sessionId: string; visitId: string }>;
+  }
+
+  test('reuses a matching daily session and visit without another session write', async () => {
+    const first = await collect(new Date(2026, 8, 15, 12));
+    const second = await collect(new Date(2026, 8, 15, 12, 1), first.cache);
+
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(second.visitId).toBe(first.visitId);
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
+    expect(saveEventMock).toHaveBeenCalledTimes(2);
+  });
+
+  test.each(['event', 'identify', 'performance'])(
+    "%s replaces yesterday's cached session before writing at local midnight",
+    async type => {
+      const payload = type === 'identify' ? { data: { plan: 'free' } } : {};
+      const first = await collect(new Date(2026, 8, 15, 23, 59, 59), undefined, payload, type);
+      vi.clearAllMocks();
+      const midnight = new Date(2026, 8, 16);
+      const second = await collect(midnight, first.cache, payload, type);
+      const write = type === 'identify' ? saveSessionDataMock : saveEventMock;
+
+      expect(second.sessionId).not.toBe(first.sessionId);
+      expect(second.visitId).not.toBe(first.visitId);
+      expect(createSessionMock).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ id: second.sessionId, websiteId: WEBSITE_ID }),
+      );
+      expect(write).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ sessionId: second.sessionId }),
+      );
+      expect(createSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
+        write.mock.invocationCallOrder[0],
+      );
+      expect(parseToken(second.cache, secret())).toMatchObject({
+        websiteId: WEBSITE_ID,
+        sessionId: second.sessionId,
+        visitId: second.visitId,
+        iat: midnight.getTime() / 1000,
+      });
+    },
+  );
+
+  test('daily IDs rotate without a cache token, including after a page reload', async () => {
+    const first = await collect(new Date(2026, 8, 15, 12));
+    const reload = await collect(new Date(2026, 8, 15, 12, 1));
+    const nextDay = await collect(new Date(2026, 8, 16, 12));
+    expect(reload.sessionId).toBe(first.sessionId);
+    expect(nextDay.sessionId).not.toBe(first.sessionId);
+  });
+
+  test('the unchanged default keeps the visitor ID across days within a month', async () => {
+    vi.stubEnv('SALT_ROTATION', undefined);
+    const first = await collect(new Date(2026, 8, 15, 23, 59, 59));
+    const nextDay = await collect(new Date(2026, 8, 16), first.cache);
+    const nextMonth = await collect(new Date(2026, 9, 1), nextDay.cache);
+    expect(nextDay.sessionId).toBe(first.sessionId);
+    expect(nextMonth.sessionId).not.toBe(first.sessionId);
+  });
+
+  test('the same visitor receives different IDs for different websites', async () => {
+    const at = new Date(2026, 8, 15, 12);
+    const first = await collect(at);
+    const second = await collect(at, undefined, { website: PIXEL_ID });
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(createSessionMock.mock.calls[1][0]).toMatchObject({
+      id: second.sessionId,
+      websiteId: PIXEL_ID,
+    });
+  });
+
+  test.each([{ ip: '2001:db8::5' }, { userAgent: 'Another browser' }])(
+    'changed client inputs rotate the session despite a cached token: %j',
+    async changed => {
+      const at = new Date(2026, 8, 15, 12);
+      const first = await collect(at);
+      getClientInfoMock.mockResolvedValue({ ...defaultClientInfo, ...changed } as any);
+      const second = await collect(at, first.cache);
+      expect(second.sessionId).not.toBe(first.sessionId);
+      expect(second.visitId).not.toBe(first.visitId);
+      expect(createSessionMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  test('changing the application secret invalidates the old token and visitor ID', async () => {
+    const at = new Date(2026, 8, 15, 12);
+    const first = await collect(at);
+    vi.stubEnv('APP_SECRET', 'replacement-identity-review-secret');
+    const second = await collect(at, first.cache);
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(fetchWebsiteMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('a supplied event timestamp selects its historical day rather than the receive day', async () => {
+    const historical = new Date(2026, 8, 15, 12);
+    const received = new Date(2026, 8, 17, 12);
+    const first = await collect(historical);
+    const backdated = await collect(received, undefined, {
+      timestamp: historical.getTime() / 1000,
+    });
+    const current = await collect(received);
+    expect(backdated.sessionId).toBe(first.sessionId);
+    expect(current.sessionId).not.toBe(first.sessionId);
+    expect(saveEventMock.mock.calls[1][0].createdAt).toEqual(historical);
+  });
+
+  test('explicit identify values remain linkable across daily rotation', async () => {
+    const payload = { id: 'customer-42' };
+    const first = await collect(new Date(2026, 8, 15, 23, 59, 59), undefined, payload, 'identify');
+    const second = await collect(new Date(2026, 8, 16), first.cache, payload, 'identify');
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(saveSessionLinkMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ sessionId: first.sessionId, distinctId: 'customer-42' }),
+    );
+    expect(saveSessionLinkMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ sessionId: second.sessionId, distinctId: 'customer-42' }),
+    );
+    expect(updateSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('ordinary collection does not pass the raw IP to persistence or the cache token', async () => {
+    const result = await collect(new Date(2026, 8, 15, 12));
+    const session = createSessionMock.mock.calls[0][0];
+    const event = saveEventMock.mock.calls[0][0];
+    const token = parseToken(result.cache, secret());
+    for (const value of [session, event, token]) {
+      expect(value).not.toHaveProperty('ip');
+      expect(JSON.stringify(value)).not.toContain(defaultClientInfo.ip);
+    }
+    expect(token).not.toHaveProperty('exp');
+  });
+
+  test('the 30-minute visit refresh currently reuses its ID within the same clock hour', async () => {
+    const first = await collect(new Date(2026, 8, 15, 9));
+    const second = await collect(new Date(2026, 8, 15, 9, 30, 1), first.cache);
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(second.visitId).toBe(first.visitId);
+    expect(parseToken(second.cache, secret())).toMatchObject({
+      iat: new Date(2026, 8, 15, 9, 30, 1).getTime() / 1000,
+    });
   });
 });
 

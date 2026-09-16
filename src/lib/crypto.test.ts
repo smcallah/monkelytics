@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { decrypt, encrypt, hash, md5, uuid } from './crypto';
+import { decrypt, encrypt, getSalt, hash, md5, uuid } from './crypto';
 
 describe('encrypt/decrypt', () => {
   test('round-trips a value with the same secret', () => {
@@ -57,6 +57,47 @@ describe('md5', () => {
 
   test('returns a 32-char hex string', () => {
     expect(md5('umami')).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe('rotation boundaries (current server-local calendar)', () => {
+  test('daily salt stays stable throughout a local calendar day', () => {
+    expect(getSalt('day', new Date(2026, 8, 15, 0, 0, 0))).toBe(
+      getSalt('day', new Date(2026, 8, 15, 23, 59, 59, 999)),
+    );
+  });
+
+  test.each([
+    [2026, 8, 15],
+    [2026, 8, 30],
+    [2026, 11, 31],
+    [2028, 1, 29],
+  ])('daily salt changes at local midnight after %i/%i/%i', (year, month, day) => {
+    expect(getSalt('day', new Date(year, month, day, 23, 59, 59, 999))).not.toBe(
+      getSalt('day', new Date(year, month, day + 1)),
+    );
+  });
+
+  test.each([
+    [2026, 2, 8],
+    [2026, 10, 1],
+  ])('daily salt spans the local DST transition day %i/%i/%i', (year, month, day) => {
+    const midnight = getSalt('day', new Date(year, month, day));
+    expect(getSalt('day', new Date(year, month, day, 1, 30))).toBe(midnight);
+    expect(getSalt('day', new Date(year, month, day, 3, 30))).toBe(midnight);
+    expect(getSalt('day', new Date(year, month, day, 23, 59))).toBe(midnight);
+    expect(getSalt('day', new Date(year, month, day + 1))).not.toBe(midnight);
+  });
+
+  test('monthly salt survives a day boundary but changes at the next month', () => {
+    const first = getSalt('month', new Date(2026, 8, 15));
+    expect(getSalt('month', new Date(2026, 8, 16))).toBe(first);
+    expect(getSalt('month', new Date(2026, 9, 1))).not.toBe(first);
+  });
+
+  test('unrecognized rotation settings currently fall back to monthly', () => {
+    const date = new Date(2026, 8, 15);
+    expect(getSalt('daily', date)).toBe(getSalt('month', date));
   });
 });
 
