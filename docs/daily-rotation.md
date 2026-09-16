@@ -17,6 +17,8 @@ misspellings such as `daily` cause application startup to fail with
 `SALT_ROTATION must be one of: day, week, month.` The same validation protects
 salt generation. Next.js's server initialization hook performs the startup
 check for Docker, standalone, and Next.js server runs.
+On Node.js, invalid configuration exits with status 1: throwing from the hook
+alone can leave Next.js's listener alive even though server initialization failed.
 
 ## Docker Compose
 

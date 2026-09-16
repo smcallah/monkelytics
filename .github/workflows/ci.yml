@@ -79,9 +79,11 @@ jobs:
       - name: Reject invalid rotation settings at container startup
         run: |
           for rotation in daily ''; do
-            if timeout 30s docker compose run --rm --no-deps -e "SALT_ROTATION=$rotation" -e SKIP_DB_CHECK=1 umami > invalid-rotation.log 2>&1; then
+            status=0
+            timeout 30s docker compose run --rm --no-deps -e "SALT_ROTATION=$rotation" -e SKIP_DB_CHECK=1 umami > invalid-rotation.log 2>&1 || status=$?
+            if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
               cat invalid-rotation.log
-              echo 'Invalid SALT_ROTATION unexpectedly started successfully'
+              echo 'Invalid SALT_ROTATION must exit unsuccessfully without timing out'
               exit 1
             fi
             cat invalid-rotation.log
