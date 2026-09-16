@@ -60,6 +60,7 @@ const saveSessionLinkMock = vi.mocked(saveSessionLink);
 const updateSessionMock = vi.mocked(updateSession);
 
 const WEBSITE_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_WEBSITE_ID = '44444444-4444-4444-8444-444444444444';
 const LINK_ID = '22222222-2222-4222-8222-222222222222';
 const PIXEL_ID = '33333333-3333-4333-8333-333333333333';
 
@@ -559,6 +560,106 @@ describe('cache token handling', () => {
     expect(fetchWebsiteMock).not.toHaveBeenCalled();
     expect(createSessionMock).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({ visitId: 'cached-visit' });
+  });
+
+  test.each(['event', 'identify', 'performance'])(
+    "%s validates the requested website and discards another website's cached state",
+    async type => {
+      const token = makeCacheToken({ sessionLinkId: 'other-website-link' });
+      fetchWebsiteMock.mockResolvedValue({ id: OTHER_WEBSITE_ID } as any);
+
+      const response = await callPOST(
+        {
+          type,
+          payload: { website: OTHER_WEBSITE_ID, url: '/', data: { plan: 'free' } },
+        },
+        { headers: { 'x-umami-cache': token } },
+      );
+
+      expect(response.status).toBe(200);
+      expect(fetchWebsiteMock).toHaveBeenCalledExactlyOnceWith(OTHER_WEBSITE_ID);
+      const body = await response.json();
+      expect(createSessionMock).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ id: body.sessionId, websiteId: OTHER_WEBSITE_ID }),
+      );
+      const write = type === 'identify' ? saveSessionDataMock : saveEventMock;
+      expect(write).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ sessionId: body.sessionId, websiteId: OTHER_WEBSITE_ID }),
+      );
+      expect(fetchWebsiteMock.mock.invocationCallOrder[0]).toBeLessThan(
+        createSessionMock.mock.invocationCallOrder[0],
+      );
+      expect(createSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
+        write.mock.invocationCallOrder[0],
+      );
+      expect(body.sessionId).not.toBe('cached-session');
+      expect(body.visitId).not.toBe('cached-visit');
+      const replacement = parseToken(body.cache, secret());
+      expect(replacement).toMatchObject({
+        websiteId: OTHER_WEBSITE_ID,
+        sessionId: body.sessionId,
+        visitId: body.visitId,
+      });
+      expect(replacement).not.toHaveProperty('sessionLinkId');
+    },
+  );
+
+  test.each(['event', 'identify', 'performance'])(
+    "%s rejects a nonexistent website even with another website's valid token",
+    async type => {
+      const token = makeCacheToken();
+      fetchWebsiteMock.mockResolvedValue(null);
+
+      const response = await callPOST(
+        {
+          type,
+          payload: {
+            website: OTHER_WEBSITE_ID,
+            url: '/',
+            id: 'customer-42',
+            data: { plan: 'free' },
+          },
+        },
+        { headers: { 'x-umami-cache': token } },
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { message: 'Website not found.' },
+      });
+      expect(fetchWebsiteMock).toHaveBeenCalledExactlyOnceWith(OTHER_WEBSITE_ID);
+      expect(getClientInfoMock).not.toHaveBeenCalled();
+      for (const write of [
+        createSessionMock,
+        saveEventMock,
+        saveSessionDataMock,
+        saveSessionLinkMock,
+        updateSessionMock,
+      ]) {
+        expect(write).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  test('a token without a website cannot suppress session creation or supply cached state', async () => {
+    const timestamp = 1704067200;
+    const token = makeCacheToken({
+      websiteId: undefined,
+      sessionId: makeComputedSessionId(WEBSITE_ID, timestamp),
+      sessionLinkId: 'unscoped-link',
+    });
+
+    const response = await callPOST(
+      { type: 'event', payload: { website: WEBSITE_ID, url: '/', timestamp } },
+      { headers: { 'x-umami-cache': token } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchWebsiteMock).toHaveBeenCalledExactlyOnceWith(WEBSITE_ID);
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
+    const body = await response.json();
+    expect(body.visitId).not.toBe('cached-visit');
+    expect(parseToken(body.cache, secret())).not.toHaveProperty('sessionLinkId');
   });
 
   test('a valid cache token creates the computed session before event writes when the cached session differs', async () => {
