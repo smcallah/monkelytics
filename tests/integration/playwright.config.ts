@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: 'daily-rotation.spec.ts',
+  testMatch: '*.spec.ts',
   workers: 1,
   retries: 0,
   timeout: 60_000,

@@ -1,8 +1,10 @@
+import { getQueryStringPolicy } from '@/lib/query-string';
 import { parseSaltRotation } from '@/lib/salt-rotation';
 
 export function register() {
   try {
     parseSaltRotation(process.env.SALT_ROTATION);
+    getQueryStringPolicy();
   } catch (error) {
     if (process.env.NEXT_RUNTIME === 'nodejs') {
       // Next.js can keep its listener alive after a rejected instrumentation hook.

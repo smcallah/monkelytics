@@ -1,3 +1,5 @@
+import { filterQueryString, parseQueryStringPolicy } from './query-string';
+
 /** Public types for the browser tracker. */
 export type TrackedProperties = {
   /**
@@ -250,6 +252,16 @@ type MetricEntry = PerformanceEntry & {
   const credentials = (config('fetch-credentials') || 'omit') as RequestCredentials;
   const perf = config('performance') === _true;
   const autoPageview = config('auto-pageview') !== _false;
+  let queryStringPolicy: ReturnType<typeof parseQueryStringPolicy>;
+  try {
+    queryStringPolicy = parseQueryStringPolicy(
+      config('query-string-policy'),
+      config('query-string-allowlist'),
+    );
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    return;
+  }
 
   const domains = domain.split(',').map(n => n.trim());
   const host =
@@ -394,6 +406,24 @@ type MetricEntry = PerformanceEntry & {
     if (!payload) return;
 
     try {
+      if (queryStringPolicy.mode === 'allowlist') {
+        // Apply after callbacks and manual payload overrides. A malformed URL
+        // stops this send rather than falling back to sending the original value.
+        payload = { ...payload };
+        if (payload.url) {
+          payload.url = filterQueryString(
+            new URL(String(payload.url), location.href),
+            queryStringPolicy,
+          ).href;
+        }
+        if (payload.referrer) {
+          payload.referrer = filterQueryString(
+            new URL(String(payload.referrer), location.href),
+            queryStringPolicy,
+            true,
+          ).href;
+        }
+      }
       const res = await fetch(endpoint, {
         keepalive: true,
         method: 'POST',
@@ -405,6 +435,7 @@ type MetricEntry = PerformanceEntry & {
           ...(typeof cache !== 'undefined' && { 'x-umami-cache': cache }),
         },
         credentials,
+        ...(queryStringPolicy.mode === 'allowlist' && { referrerPolicy: 'no-referrer' as const }),
       });
 
       const data = (await res.json()) as { cache?: string; disabled?: boolean } | null;

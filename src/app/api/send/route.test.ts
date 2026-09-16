@@ -107,6 +107,8 @@ beforeEach(() => {
   delete process.env.DISABLE_BOT_CHECK;
   delete process.env.REMOVE_TRAILING_SLASH;
   delete process.env.SALT_ROTATION;
+  delete process.env.QUERY_STRING_POLICY;
+  delete process.env.QUERY_STRING_ALLOWLIST;
 
   isbotMock.mockReturnValue(false);
   hasBlockedIpMock.mockReturnValue(false);
@@ -349,6 +351,62 @@ describe('eventType selection ladder', () => {
     await callPOST({ type: 'event', payload: { website: WEBSITE_ID, url: '/' } });
 
     expect(saveEventMock.mock.calls[0][0]).toMatchObject({ eventType: EVENT_TYPE.pageView });
+  });
+});
+
+describe('query string privacy', () => {
+  test.each(['website', 'link', 'pixel'])(
+    'filters %s events before all persistence fields',
+    async source => {
+      process.env.QUERY_STRING_POLICY = 'allowlist';
+      process.env.QUERY_STRING_ALLOWLIST = 'utm_source,utm_campaign';
+      const response = await callPOST({
+        type: 'event',
+        payload: {
+          [source]: WEBSITE_ID,
+          hostname: 'example.com',
+          name: 'purchase',
+          url: '/products?email=secret&utm_source=news&utm_campaign=launch&utm_term=private&gclid=a&fbclid=b&msclkid=c&ttclid=d&li_fat_id=e&twclid=f#token=secret',
+          referrer: 'https://other.test/prev?email=secret&utm_source=ref#secret',
+        },
+      });
+      expect(response.status).toBe(200);
+      expect(saveEventMock.mock.calls[0][0]).toMatchObject({
+        urlPath: '/products',
+        urlQuery: 'utm_source=news&utm_campaign=launch',
+        referrerPath: '/prev',
+        referrerQuery: '',
+        referrerDomain: 'other.test',
+        utmSource: 'news',
+        utmCampaign: 'launch',
+        utmTerm: null,
+        gclid: null,
+        fbclid: null,
+        msclkid: null,
+        ttclid: null,
+        lifatid: null,
+        twclid: null,
+      });
+      expect(JSON.stringify(saveEventMock.mock.calls)).not.toContain('secret');
+    },
+  );
+
+  test('an empty allowlist drops campaigns too', async () => {
+    process.env.QUERY_STRING_POLICY = 'allowlist';
+    await callPOST({
+      type: 'event',
+      payload: {
+        website: WEBSITE_ID,
+        url: '/?utm_source=news',
+        referrer: '/previous?token=secret',
+      },
+    });
+    expect(saveEventMock.mock.calls[0][0]).toMatchObject({
+      urlQuery: '',
+      utmSource: null,
+      referrerQuery: '',
+      referrerDomain: undefined,
+    });
   });
 });
 

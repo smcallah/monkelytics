@@ -127,6 +127,9 @@ rotation behavior, privacy limits, regression coverage, and the proposed daily-I
 See [visitor rotation configuration](docs/daily-rotation.md) to opt into UTC daily
 rotation. Monthly rotation remains the default.
 
+See [query-string privacy](docs/query-string-privacy.md) to opt into filtering URL
+queries in the tracker and collection server. Existing collection remains the default.
+
 ## 🛟 Support
 
 <p align="center">
