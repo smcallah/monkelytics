@@ -1,0 +1,22 @@
+# Optional local demo. Reuses your already-built application image.
+services:
+  demo:
+    image: "${DEMO_IMAGE:?Set DEMO_IMAGE to the existing application image name}"
+    command: ["node", "/demo/server.mjs"]
+    environment:
+      DEMO_WEBSITE_ID: "${DEMO_WEBSITE_ID:?Create a separate demo website first}"
+      DEMO_ANALYTICS_URL: "${DEMO_ANALYTICS_URL:?Set the browser-reachable analytics URL}"
+    volumes:
+      - ./demo:/demo:ro
+    ports:
+      - "${DEMO_PORT:-3301}:3301"
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3301/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

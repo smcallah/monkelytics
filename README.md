@@ -130,6 +130,9 @@ rotation. Monthly rotation remains the default.
 See [query-string privacy](docs/query-string-privacy.md) to opt into filtering URL
 queries in the tracker and collection server. Existing collection remains the default.
 
+See [the local demo](docs/local-demo.md) for a small website that sends real
+pageviews and sample events to a separate demo website record.
+
 ## 🛟 Support
 
 <p align="center">
