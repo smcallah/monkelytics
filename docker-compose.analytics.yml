@@ -1,0 +1,12 @@
+# Optional deployment overlay. The source is required only when this file is used.
+services:
+  umami:
+    environment:
+      ANALYTICS_MANIFEST_PATH: /tracking-plan/analytics.yaml
+    volumes:
+      - type: bind
+        source: ${ANALYTICS_MANIFEST_FILE:?Set ANALYTICS_MANIFEST_FILE to an absolute file path}
+        target: /tracking-plan/analytics.yaml
+        read_only: true
+        bind:
+          create_host_path: false

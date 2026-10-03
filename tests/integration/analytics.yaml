@@ -1,0 +1,15 @@
+version: 1
+websites:
+  aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:
+    events:
+      button:
+        properties:
+          button: {type: string, required: true}
+          count: {type: number}
+  bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:
+    mode: reject
+    events:
+      button:
+        properties:
+          button: {type: string, required: true}
+          count: {type: number}

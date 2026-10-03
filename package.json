@@ -42,6 +42,7 @@
     "download-country-names": "node scripts/download-country-names.js",
     "download-language-names": "node scripts/download-language-names.js",
     "change-password": "node scripts/change-password.js",
+    "analytics": "tsx scripts/analytics-manifest.ts",
     "postbuild": "node scripts/postbuild.js",
     "pretest": "pnpm build-db-client",
     "test": "vitest run",
@@ -117,6 +118,7 @@
     "thenby": "^1.4.1",
     "ua-parser-js": "^2.0.10",
     "uuid": "^14.0.1",
+    "yaml": "^2.9.1",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },

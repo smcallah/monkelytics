@@ -134,8 +134,11 @@ See [anonymous collection](docs/anonymous-collection.md) to disable explicit
 identification and record events at server receive time. Standard mode remains
 the default for existing sites and historical imports.
 
-See [the roadmap](docs/roadmap.md) for the current stage and the planned
-`analytics.yaml` tracking contract.
+See [the roadmap](docs/roadmap.md) for the current stage and future work.
+
+See [tracking plans](docs/tracking-plans.md) for `analytics.yaml` validation,
+typed event helpers, and optional per-site observation or rejection. Websites
+without an assigned plan retain existing dynamic events.
 
 See [the local demo](docs/local-demo.md) for a small website that sends real
 pageviews and sample events to a separate demo website record.
