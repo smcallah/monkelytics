@@ -98,7 +98,9 @@ function makeComputedSessionId(sourceId: string, timestamp = Math.floor(Date.now
   const createdAt = new Date(timestamp * 1000);
   const sessionSalt = getSalt(process.env.SALT_ROTATION || 'month', createdAt);
 
-  return uuid(sourceId, defaultClientInfo.ip, defaultClientInfo.userAgent, sessionSalt);
+  return process.env.COLLECTION_MODE === 'anonymous'
+    ? uuid('anonymous', sourceId, defaultClientInfo.ip, defaultClientInfo.userAgent, sessionSalt)
+    : uuid(sourceId, defaultClientInfo.ip, defaultClientInfo.userAgent, sessionSalt);
 }
 
 beforeEach(() => {
@@ -107,6 +109,7 @@ beforeEach(() => {
   delete process.env.DISABLE_BOT_CHECK;
   delete process.env.REMOVE_TRAILING_SLASH;
   delete process.env.SALT_ROTATION;
+  delete process.env.COLLECTION_MODE;
   delete process.env.QUERY_STRING_POLICY;
   delete process.env.QUERY_STRING_ALLOWLIST;
 
@@ -1091,6 +1094,185 @@ describe('visitor identity across requests (current behavior)', () => {
     expect(parseToken(second.cache, secret())).toMatchObject({
       iat: new Date(2026, 8, 15, 9, 30, 1).getTime() / 1000,
     });
+  });
+});
+
+describe('anonymous collection policy', () => {
+  beforeEach(() => {
+    vi.stubEnv('COLLECTION_MODE', 'anonymous');
+    vi.stubEnv('SALT_ROTATION', 'day');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-16T00:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  test.each([{ id: 'customer-42', data: { plan: 'pro' } }, { data: { id: 'customer-42' } }, {}])(
+    'rejects identify before lookup, detection or persistence: %j',
+    async payload => {
+      const response = await callPOST({
+        type: 'identify',
+        payload: { website: WEBSITE_ID, ...payload },
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: { message: 'Identification is disabled in anonymous collection mode.' },
+      });
+      for (const operation of [
+        fetchWebsiteMock,
+        getClientInfoMock,
+        createSessionMock,
+        saveEventMock,
+        saveSessionDataMock,
+        saveSessionLinkMock,
+        updateSessionMock,
+      ]) {
+        expect(operation).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  test.each(['website', 'link', 'pixel'])(
+    'drops explicit event identities for %s in both database backends',
+    async source => {
+      for (const enabled of [false, true]) {
+        vi.clearAllMocks();
+        (clickhouse as any).enabled = enabled;
+        const response = await callPOST({
+          type: 'event',
+          payload: {
+            [source]: WEBSITE_ID,
+            url: '/',
+            id: 'customer-42',
+            name: 'button',
+            data: { button: 'sample' },
+          },
+        });
+        expect(response.status).toBe(200);
+        expect(saveEventMock).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            distinctId: undefined,
+            eventName: 'button',
+            eventData: { button: 'sample' },
+          }),
+        );
+        if (!enabled) expect(createSessionMock.mock.calls[0][0].distinctId).toBeUndefined();
+        expect(saveSessionLinkMock).not.toHaveBeenCalled();
+        expect(updateSessionMock).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  test.each(['event', 'performance'])(
+    "%s uses receive time and rotates yesterday's cached visitor despite timestamp overrides",
+    async type => {
+      vi.setSystemTime(new Date('2026-09-15T23:59:59Z'));
+      const first = await callPOST({ type, payload: { website: WEBSITE_ID, url: '/' } });
+      const previous = await first.json();
+      vi.setSystemTime(new Date('2026-09-16T00:00:00Z'));
+      vi.clearAllMocks();
+      const response = await callPOST(
+        {
+          type,
+          payload: {
+            website: WEBSITE_ID,
+            url: '/',
+            id: 'customer-42',
+            timestamp: Date.parse('2026-09-15T23:59:59Z') / 1000,
+          },
+        },
+        { headers: { 'x-umami-cache': previous.cache } },
+      );
+      const current = await response.json();
+      expect(current.sessionId).not.toBe(previous.sessionId);
+      expect(current.visitId).not.toBe(previous.visitId);
+      expect(saveEventMock.mock.calls[0][0].createdAt).toEqual(new Date('2026-09-16T00:00:00Z'));
+      expect(createSessionMock.mock.calls[0][0].createdAt).toEqual(
+        new Date('2026-09-16T00:00:00Z'),
+      );
+      expect(createSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
+        saveEventMock.mock.invocationCallOrder[0],
+      );
+    },
+  );
+
+  test.each([0, 1, 9999999999])(
+    'ignores supplied timestamp %s and still expires visits',
+    async timestamp => {
+      const cache = createToken(
+        {
+          type: CACHE_TOKEN_TYPE,
+          websiteId: WEBSITE_ID,
+          sessionId: makeComputedSessionId(WEBSITE_ID),
+          visitId: 'old-visit',
+          iat: Date.now() / 1000 - 1801,
+          sessionLinkId: 'old-link',
+        },
+        secret(),
+      );
+      const response = await callPOST(
+        { type: 'event', payload: { website: WEBSITE_ID, url: '/', timestamp } },
+        { headers: { 'x-umami-cache': cache } },
+      );
+      const current = await response.json();
+      expect(current.visitId).not.toBe('old-visit');
+      expect(parseToken(current.cache, secret())).not.toHaveProperty('sessionLinkId');
+      expect(saveEventMock.mock.calls[0][0].createdAt).toEqual(new Date('2026-09-16T00:00:00Z'));
+    },
+  );
+
+  test('records arrival time before asynchronous lookup and detection', async () => {
+    getClientInfoMock.mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date('2026-09-17T00:00:00Z'));
+      return { ...defaultClientInfo } as any;
+    });
+    const response = await callPOST({ type: 'event', payload: { website: WEBSITE_ID, url: '/' } });
+    expect(response.status).toBe(200);
+    expect(saveEventMock.mock.calls[0][0].createdAt).toEqual(new Date('2026-09-16T00:00:00Z'));
+  });
+
+  test('switching modes isolates events from an existing identified session and cache link', async () => {
+    vi.stubEnv('COLLECTION_MODE', 'standard');
+    const identified = await callPOST({
+      type: 'identify',
+      payload: { website: WEBSITE_ID, id: 'customer-42' },
+    });
+    const previous = await identified.json();
+    expect(parseToken(previous.cache, secret())).toHaveProperty('sessionLinkId');
+    vi.stubEnv('COLLECTION_MODE', 'anonymous');
+    vi.clearAllMocks();
+    const response = await callPOST(
+      { type: 'event', payload: { website: WEBSITE_ID, url: '/' } },
+      { headers: { 'x-umami-cache': previous.cache } },
+    );
+    const current = await response.json();
+    expect(current.sessionId).not.toBe(previous.sessionId);
+    expect(current.visitId).not.toBe(previous.visitId);
+    expect(createSessionMock).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: current.sessionId, distinctId: undefined }),
+    );
+    expect(parseToken(current.cache, secret())).not.toHaveProperty('sessionLinkId');
+    expect(saveSessionLinkMock).not.toHaveBeenCalled();
+    expect(updateSessionMock).not.toHaveBeenCalled();
+  });
+
+  test('explicit standard mode preserves historical imports and identity writes', async () => {
+    vi.stubEnv('COLLECTION_MODE', 'standard');
+    const timestamp = Date.parse('2026-09-15T12:00:00Z') / 1000;
+    const response = await callPOST({
+      type: 'identify',
+      payload: { website: WEBSITE_ID, timestamp, id: 'customer-42', data: { plan: 'pro' } },
+    });
+    expect(response.status).toBe(200);
+    expect(saveSessionLinkMock).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ distinctId: 'customer-42', createdAt: new Date(timestamp * 1000) }),
+    );
+    expect(saveSessionDataMock).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ distinctId: 'customer-42', createdAt: new Date(timestamp * 1000) }),
+    );
   });
 });
 

@@ -8,6 +8,7 @@ services:
       DATABASE_URL: postgresql://umami:umami@db:5432/umami
       APP_SECRET: replace-me-with-a-random-string
       SALT_ROTATION: "${SALT_ROTATION-month}"
+      COLLECTION_MODE: "${COLLECTION_MODE-standard}"
       QUERY_STRING_POLICY: "${QUERY_STRING_POLICY-preserve}"
       QUERY_STRING_ALLOWLIST: "${QUERY_STRING_ALLOWLIST-}"
       # Required for two-factor authentication, generate with: openssl rand -hex 32

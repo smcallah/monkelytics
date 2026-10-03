@@ -60,7 +60,9 @@ This setting changes pseudonymous visitor IDs, not the explicit identification
 API. `identify()` values can still link sessions across days, and supplied event
 timestamps still select their historical identity period. The calendar salt is
 deterministic; this is not daily secret destruction or guaranteed unlinkability.
-See the [identity review](visitor-identity-review.md) for remaining policy work.
+Use [anonymous collection](anonymous-collection.md) to disable explicit identity
+linking and use receive time. Standard mode retains these compatibility limits.
+See the [identity review](visitor-identity-review.md) for other policy boundaries.
 
 ## Verification
 
