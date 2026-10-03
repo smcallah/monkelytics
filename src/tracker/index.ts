@@ -1,3 +1,4 @@
+import { parseCollectionMode } from './collection-mode';
 import { filterQueryString, parseQueryStringPolicy } from './query-string';
 
 /** Public types for the browser tracker. */
@@ -253,7 +254,9 @@ type MetricEntry = PerformanceEntry & {
   const perf = config('performance') === _true;
   const autoPageview = config('auto-pageview') !== _false;
   let queryStringPolicy: ReturnType<typeof parseQueryStringPolicy>;
+  let collectionMode: ReturnType<typeof parseCollectionMode>;
   try {
+    collectionMode = parseCollectionMode(config('collection-mode'));
     queryStringPolicy = parseQueryStringPolicy(
       config('query-string-policy'),
       config('query-string-allowlist'),
@@ -406,6 +409,11 @@ type MetricEntry = PerformanceEntry & {
     if (!payload) return;
 
     try {
+      if (collectionMode === 'anonymous') {
+        payload = { ...payload };
+        delete payload.id;
+        delete payload.timestamp;
+      }
       if (queryStringPolicy.mode === 'allowlist') {
         // Apply after callbacks and manual payload overrides. A malformed URL
         // stops this send rather than falling back to sending the original value.
@@ -473,6 +481,7 @@ type MetricEntry = PerformanceEntry & {
     id: string | (EventData & { id?: string }),
     data?: EventData,
   ): Promise<void> => {
+    if (collectionMode === 'anonymous') return Promise.resolve();
     const nextIdentity = typeof id === 'string' ? id : id.id;
 
     if (nextIdentity !== undefined) {

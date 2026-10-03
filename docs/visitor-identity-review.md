@@ -104,8 +104,10 @@ of a website for a valid matching token. Those remain separate decisions.
 2. Implemented in the [UTC daily follow-up](daily-rotation.md): explicit UTC daily
    boundaries, preserved weekly/monthly behavior, configuration validation, and
    Compose support. Daily mode remains opt-in.
-3. Decide how anonymous mode handles explicit identities and supplied event
-   timestamps. Document the resulting privacy limits and import compatibility.
+3. Implemented in [anonymous collection](anonymous-collection.md): opt-in
+   rejection of identification, receive-time timestamps, explicit-ID removal,
+   and separation from standard-mode sessions. Standard imports retain their
+   existing behavior. Remaining ingestion/privacy limits are documented there.
 4. Enable the daily default only with those boundaries defined. Test open tabs
    across midnight through the actual tracker, HTTP server, and PostgreSQL, and
    verify that daily visitor counts change as documented.

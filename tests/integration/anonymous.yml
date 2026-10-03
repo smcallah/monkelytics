@@ -1,0 +1,5 @@
+# Test-only overlay; use with the existing clock-controlled integration overlay.
+services:
+  umami:
+    environment:
+      COLLECTION_MODE: anonymous

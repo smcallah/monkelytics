@@ -2,6 +2,7 @@ import { startOfHour } from 'date-fns';
 import { isbot } from 'isbot';
 import { z } from 'zod';
 import clickhouse from '@/lib/clickhouse';
+import { getCollectionMode } from '@/lib/collection-mode';
 import { CACHE_TOKEN_TYPE, COLLECTION_TYPE, EVENT_TYPE } from '@/lib/constants';
 import { getSalt, hash, secret, uuid } from '@/lib/crypto';
 import { getClientInfo, hasBlockedIp } from '@/lib/detect';
@@ -81,6 +82,7 @@ const schema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const receivedAt = new Date();
     const { body, error } = await parseRequest(request, schema, { skipAuth: true });
 
     if (error) {
@@ -88,6 +90,10 @@ export async function POST(request: Request) {
     }
 
     const { type, payload } = body;
+    const anonymous = getCollectionMode() === 'anonymous';
+    if (anonymous && type === COLLECTION_TYPE.identify) {
+      return forbidden({ message: 'Identification is disabled in anonymous collection mode.' });
+    }
     const queryStringPolicy = getQueryStringPolicy();
 
     const {
@@ -103,14 +109,19 @@ export async function POST(request: Request) {
       data,
       title,
       tag,
-      timestamp,
-      id,
+      timestamp: suppliedTimestamp,
+      id: suppliedId,
       lcp,
       inp,
       cls,
       fcp,
       ttfb,
     } = payload;
+
+    // Old trackers can still send these fields. Enforce the policy before deriving
+    // IDs or passing data to either persistence backend.
+    const timestamp = anonymous ? undefined : suppliedTimestamp;
+    const id = anonymous ? undefined : suppliedId;
 
     const sourceId = websiteId || pixelId || linkId;
 
@@ -139,7 +150,7 @@ export async function POST(request: Request) {
     }
 
     // Carried forward in the cache token so repeat identify calls skip identity writes
-    let sessionLinkId = cache?.sessionLinkId;
+    let sessionLinkId = anonymous ? undefined : cache?.sessionLinkId;
 
     // Client info
     const { ip, userAgent, device, browser, os, country, region, city } = await getClientInfo(
@@ -157,13 +168,16 @@ export async function POST(request: Request) {
       return forbidden();
     }
 
-    const createdAt = timestamp ? new Date(timestamp * 1000) : new Date();
-    const now = Math.floor(Date.now() / 1000);
+    const createdAt = anonymous ? receivedAt : timestamp ? new Date(timestamp * 1000) : new Date();
+    const now = Math.floor((anonymous ? receivedAt.getTime() : Date.now()) / 1000);
 
     const sessionSalt = getSalt(process.env.SALT_ROTATION, createdAt);
     const visitSalt = hash(startOfHour(createdAt).toUTCString());
 
-    const sessionId = uuid(sourceId, ip, userAgent, sessionSalt);
+    // Separate IDs prevent new anonymous events joining previously identified sessions.
+    const sessionId = anonymous
+      ? uuid('anonymous', sourceId, ip, userAgent, sessionSalt)
+      : uuid(sourceId, ip, userAgent, sessionSalt);
     const sessionDrift = !!websiteId && !!cache?.sessionId && cache.sessionId !== sessionId;
     const shouldEnsureSession = !clickhouse.enabled && sessionDrift;
 

@@ -34,7 +34,7 @@ jobs:
         if: matrix.check == 'test'
         run: |
           for timezone in UTC America/New_York Asia/Kathmandu; do
-            TZ="$timezone" pnpm exec vitest run src/app/api/send/route.test.ts src/lib/crypto.test.ts src/lib/session.test.ts src/lib/salt-rotation.test.ts
+            TZ="$timezone" pnpm exec vitest run src/app/api/send/route.test.ts src/lib/crypto.test.ts src/lib/session.test.ts src/lib/salt-rotation.test.ts src/lib/collection-mode.test.ts
           done
       - name: Verify health over HTTP
         if: matrix.check == 'build'
@@ -102,6 +102,19 @@ jobs:
             cat invalid-query-policy.log
             grep -F 'QUERY_STRING_' invalid-query-policy.log
           done
+      - name: Reject invalid collection modes at container startup
+        run: |
+          for mode in invalid ''; do
+            status=0
+            timeout 30s docker compose run --rm --no-deps -e "COLLECTION_MODE=$mode" -e SKIP_DB_CHECK=1 umami > invalid-collection-mode.log 2>&1 || status=$?
+            if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
+              cat invalid-collection-mode.log
+              echo 'Invalid COLLECTION_MODE must exit unsuccessfully without timing out'
+              exit 1
+            fi
+            cat invalid-collection-mode.log
+            grep -F 'COLLECTION_MODE must be one of: standard, anonymous.' invalid-collection-mode.log
+          done
       - uses: pnpm/action-setup@v4
         with:
           run_install: false
@@ -123,6 +136,14 @@ jobs:
         run: |
           docker compose up --no-build -d --wait --wait-timeout 120
           pnpm exec playwright test --config tests/integration/playwright.config.ts
+      - name: Verify anonymous browser, direct and batch collection in PostgreSQL
+        env:
+          COMPOSE_FILE: docker-compose.yml:docker-compose.ipv6.yml:tests/integration/compose.yml:tests/integration/anonymous.yml
+          COMPOSE_PATH_SEPARATOR: ":"
+          COLLECTION_MODE_TEST: anonymous
+        run: |
+          docker compose up --no-build -d --wait --wait-timeout 120
+          pnpm exec playwright test --config tests/integration/playwright.config.ts anonymous-collection.spec.ts
       - name: Show deployment logs on failure
         if: failure()
         run: docker compose logs --no-color
