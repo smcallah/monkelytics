@@ -12,5 +12,6 @@ geo
 .idea
 .env
 .env.*
+analytics.yaml
 scripts/seed
 scripts/seed-data.ts

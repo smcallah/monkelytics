@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     }
 
     const errors = [];
+    const validations = [];
 
     let index = 0;
     let cache = null;
@@ -40,6 +41,9 @@ export async function POST(request: Request) {
         errors.push({ index, response: responseJson });
       } else {
         cache ??= responseJson.cache;
+        if (responseJson.validation?.issues?.length) {
+          validations.push({ index, validation: responseJson.validation });
+        }
       }
 
       index++;
@@ -51,6 +55,7 @@ export async function POST(request: Request) {
       errors: errors.length,
       details: errors,
       cache,
+      ...(validations.length && { validations }),
     });
   } catch (e) {
     return serverError(e);

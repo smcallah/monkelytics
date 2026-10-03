@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 process.env.APP_SECRET = 'route-send-test-secret';
 
 import { isbot } from 'isbot';
+import { parseAnalyticsManifest } from '@/lib/analytics-manifest';
 import clickhouse from '@/lib/clickhouse';
 import { CACHE_TOKEN_TYPE, EVENT_TYPE } from '@/lib/constants';
 import { getSalt, secret, uuid } from '@/lib/crypto';
@@ -12,6 +13,7 @@ import { getClientInfo, hasBlockedIp } from '@/lib/detect';
 import { createToken, parseToken } from '@/lib/jwt';
 import { fetchWebsite } from '@/lib/load';
 import { parseRequest } from '@/lib/request';
+import { getTrackingPlan } from '@/lib/tracking-plan';
 import {
   createSession,
   saveEvent,
@@ -48,6 +50,11 @@ vi.mock('isbot', () => ({
   isbot: vi.fn(),
 }));
 
+vi.mock('@/lib/tracking-plan', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/tracking-plan')>()),
+  getTrackingPlan: vi.fn(),
+}));
+
 const parseRequestMock = vi.mocked(parseRequest);
 const getClientInfoMock = vi.mocked(getClientInfo);
 const hasBlockedIpMock = vi.mocked(hasBlockedIp);
@@ -58,6 +65,7 @@ const saveEventMock = vi.mocked(saveEvent);
 const saveSessionDataMock = vi.mocked(saveSessionData);
 const saveSessionLinkMock = vi.mocked(saveSessionLink);
 const updateSessionMock = vi.mocked(updateSession);
+const getTrackingPlanMock = vi.mocked(getTrackingPlan);
 
 const WEBSITE_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_WEBSITE_ID = '44444444-4444-4444-8444-444444444444';
@@ -105,6 +113,8 @@ function makeComputedSessionId(sourceId: string, timestamp = Math.floor(Date.now
 
 beforeEach(() => {
   vi.clearAllMocks();
+  Reflect.deleteProperty(globalThis, '__monkelyticsTrackingPlan');
+  getTrackingPlanMock.mockReturnValue(undefined);
   (clickhouse as any).enabled = false;
   delete process.env.DISABLE_BOT_CHECK;
   delete process.env.REMOVE_TRAILING_SLASH;
@@ -1273,6 +1283,112 @@ describe('anonymous collection policy', () => {
     expect(saveSessionDataMock).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ distinctId: 'customer-42', createdAt: new Date(timestamp * 1000) }),
     );
+  });
+});
+
+describe('per-website tracking plans', () => {
+  function plan(mode = 'observe') {
+    return parseAnalyticsManifest(
+      `version: 1\nwebsites:\n  ${WEBSITE_ID}:\n    mode: ${mode}\n    events:\n      button:\n        properties:\n          count: { type: number, required: true }`,
+    ).websites[WEBSITE_ID];
+  }
+  test('observe reports drift and preserves the unmodified event', async () => {
+    getTrackingPlanMock.mockReturnValue(plan());
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const data = { count: 'private-value', secret: '203.0.113.5' };
+    const response = await callPOST({
+      type: 'event',
+      payload: { website: WEBSITE_ID, url: '/', name: 'button', data },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      validation: {
+        mode: 'observe',
+        issues: [
+          { code: 'undeclared_property', property: 'secret' },
+          { code: 'invalid_type', property: 'count' },
+        ],
+      },
+    });
+    expect(saveEventMock).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ eventData: data }),
+    );
+    expect(warning).toHaveBeenCalledExactlyOnceWith('Tracking plan mismatch', {
+      websiteId: WEBSITE_ID,
+      codes: ['undeclared_property', 'invalid_type'],
+    });
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('private-value');
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('203.0.113.5');
+    warning.mockRestore();
+  });
+  test.each([false, true])(
+    'reject prevents all persistence with ClickHouse enabled=%s',
+    async enabled => {
+      (clickhouse as any).enabled = enabled;
+      getTrackingPlanMock.mockReturnValue(plan('reject'));
+      const response = await callPOST({
+        type: 'event',
+        payload: { website: WEBSITE_ID, url: '/', name: 'missing', data: { secret: 'private' } },
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { validation: { mode: 'reject', issues: [{ code: 'undeclared_event' }] } },
+      });
+      for (const operation of [
+        createSessionMock,
+        saveEventMock,
+        saveSessionDataMock,
+        saveSessionLinkMock,
+        updateSessionMock,
+        getClientInfoMock,
+      ])
+        expect(operation).not.toHaveBeenCalled();
+    },
+  );
+  test('a same-site signed token cannot bypass rejection', async () => {
+    getTrackingPlanMock.mockReturnValue(plan('reject'));
+    const accepted = await callPOST({
+      type: 'event',
+      payload: { website: WEBSITE_ID, url: '/', name: 'button', data: { count: 1 } },
+    });
+    const token = (await accepted.json()).cache;
+    vi.clearAllMocks();
+    const response = await callPOST(
+      { type: 'event', payload: { website: WEBSITE_ID, url: '/', name: 'button', data: {} } },
+      { headers: { 'x-umami-cache': token } },
+    );
+    expect(response.status).toBe(400);
+    expect(saveEventMock).not.toHaveBeenCalled();
+    expect(createSessionMock).not.toHaveBeenCalled();
+    expect(fetchWebsiteMock).not.toHaveBeenCalled();
+    expect(getTrackingPlanMock).toHaveBeenCalledExactlyOnceWith(WEBSITE_ID);
+  });
+  test('unconfigured websites and their dynamic events remain unchanged', async () => {
+    getTrackingPlanMock.mockImplementation(id => (id === WEBSITE_ID ? plan('reject') : undefined));
+    const response = await callPOST({
+      type: 'event',
+      payload: {
+        website: OTHER_WEBSITE_ID,
+        url: '/',
+        name: 'undeclared',
+        data: { anything: [1, 'two'] },
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty('validation');
+    expect(saveEventMock).toHaveBeenCalledOnce();
+  });
+  test.each([
+    { type: 'event', payload: { website: WEBSITE_ID, url: '/' } },
+    { type: 'performance', payload: { website: WEBSITE_ID, url: '/', name: 'button' } },
+    { type: 'identify', payload: { website: WEBSITE_ID, id: 'standard-user' } },
+    { type: 'event', payload: { link: LINK_ID, url: '/', name: 'button' } },
+    { type: 'event', payload: { pixel: PIXEL_ID, url: '/', name: 'button' } },
+  ])('validation is scoped to named website events: %j', async request => {
+    getTrackingPlanMock.mockReturnValue(plan('reject'));
+    const response = await callPOST(request);
+    expect(response.status).toBe(200);
+    expect(getTrackingPlanMock).not.toHaveBeenCalled();
   });
 });
 

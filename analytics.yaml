@@ -1,0 +1,24 @@
+# Example only. Replace the IDs with your existing Monkelytics website IDs.
+# This file is not loaded unless ANALYTICS_MANIFEST_PATH is set.
+version: 1
+websites:
+  11111111-1111-4111-8111-111111111111:
+    mode: observe
+    events:
+      demo_button_click:
+        properties:
+          button:
+            type: string
+            required: true
+          page:
+            type: string
+      purchase:
+        properties:
+          revenue:
+            type: number
+            required: true
+          currency:
+            type: string
+            required: true
+          returning:
+            type: boolean

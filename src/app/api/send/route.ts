@@ -1,6 +1,7 @@
 import { startOfHour } from 'date-fns';
 import { isbot } from 'isbot';
 import { z } from 'zod';
+import { validatePlannedEvent } from '@/lib/analytics-manifest';
 import clickhouse from '@/lib/clickhouse';
 import { getCollectionMode } from '@/lib/collection-mode';
 import { CACHE_TOKEN_TYPE, COLLECTION_TYPE, EVENT_TYPE } from '@/lib/constants';
@@ -12,6 +13,7 @@ import { getQueryStringPolicy } from '@/lib/query-string';
 import { parseRequest } from '@/lib/request';
 import { badRequest, forbidden, json, serverError } from '@/lib/response';
 import { anyObjectParam, urlOrPathParam } from '@/lib/schema';
+import { getTrackingPlan, reportTrackingIssues } from '@/lib/tracking-plan';
 import { safeDecodeURI, safeDecodeURIComponent } from '@/lib/url';
 import {
   createSession,
@@ -147,6 +149,17 @@ export async function POST(request: Request) {
           return badRequest({ message: 'Website not found.' });
         }
       }
+    }
+
+    const plan =
+      type === COLLECTION_TYPE.event && websiteId && name ? getTrackingPlan(websiteId) : undefined;
+    const issues = plan ? validatePlannedEvent(plan, name, data) : [];
+    const validation = plan ? { mode: plan.mode, issues } : undefined;
+    if (issues.length) {
+      if (plan.mode === 'reject') {
+        return badRequest({ message: 'Event does not match the tracking plan.', validation });
+      }
+      reportTrackingIssues(websiteId, issues);
     }
 
     // Carried forward in the cache token so repeat identify calls skip identity writes
@@ -402,7 +415,7 @@ export async function POST(request: Request) {
       secret(),
     );
 
-    return json({ cache: token, sessionId, visitId });
+    return json({ cache: token, sessionId, visitId, ...(validation && { validation }) });
   } catch (e) {
     return serverError(e);
   }
