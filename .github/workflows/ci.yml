@@ -156,7 +156,7 @@ jobs:
           ANALYTICS_MANIFEST_FILE: ${{ github.workspace }}/tests/integration/invalid-analytics.yaml
         run: |
           status=0
-          timeout 30s docker compose -f docker-compose.yml -f docker-compose.analytics.yml run --rm --no-deps -e SKIP_DB_CHECK=1 umami > invalid-manifest.log 2>&1 || status=$?
+          timeout 30s docker compose -f docker-compose.yml -f docker-compose.ipv6.yml -f docker-compose.analytics.yml run --rm --no-deps -e SKIP_DB_CHECK=1 umami > invalid-manifest.log 2>&1 || status=$?
           if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
             cat invalid-manifest.log
             echo 'Invalid manifest must fail startup without timing out'
@@ -172,6 +172,9 @@ jobs:
           TRACKING_PLAN_TEST: enabled
         run: |
           docker compose config --quiet
+          # Recreate the disposable containers when removing clock/privacy overlays.
+          # Keep the database volume, but avoid stale network aliases on reused containers.
+          docker compose down
           docker compose up --no-build -d --wait --wait-timeout 120
           pnpm exec playwright test --config tests/integration/playwright.config.ts tracking-plan.spec.ts
       - name: Show deployment logs on failure
